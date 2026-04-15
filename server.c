@@ -1,0 +1,116 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <errno.h>
+
+#include "config.h"
+#include "readwrite.h"
+#include "msg.h"
+#include "printMsg.h"
+
+int main() {
+    struct sockaddr_in addr;
+    int socket_fd;
+    int client_fd;
+    int socket_option;
+
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    char client_ip[INET_ADDRSTRLEN];
+
+    char msg[MAX_MSG_LEN + 1];
+    char reply[MAX_MSG_LEN + 1];
+    char print_msg[MAX_PRINT_MSG_LEN + 1];
+
+    socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd == -1) {
+        perror("socket failure");
+        exit(EXIT_FAILURE);
+    }
+
+    socket_option = 1;
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &socket_option, sizeof(socket_option)) == -1) {
+        close(socket_fd);
+        perror("setsockopt failure");
+        exit(EXIT_FAILURE);
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(socket_fd, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
+        close(socket_fd);
+        perror("bind failure");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(socket_fd, SOMAXCONN) == -1) {
+        close(socket_fd);
+        perror("listen failure");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Listening on port %d\n", PORT);
+
+    client_fd = accept(socket_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+    if (client_fd == -1) {
+        close(socket_fd);
+        perror("accept failure");
+        exit(EXIT_FAILURE);
+    }
+
+    inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+    snprintf(print_msg, sizeof(print_msg), "-- User %s has joined the conversation\n", client_ip);
+    printMsg(stdout, print_msg);
+
+    while (1) {
+		//perimenw mhnuma apo client
+        ssize_t read_bytes = recvMessage(client_fd, msg, MAX_MSG_LEN);
+
+        if (read_bytes == 0) {
+            snprintf(print_msg, sizeof(print_msg), "-- User %s has left the conversation\n", client_ip);
+            printMsg(stdout, print_msg);
+            close(client_fd);
+            break;
+        } else if (read_bytes == -1) {
+            perror("recvMessage failure");
+            close(client_fd);
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        } else if (read_bytes == -2) {
+            printMsg(stderr, "error: client message too large for buffer\n");
+            close(client_fd);
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        }
+
+		//to kanw omorfo
+        snprintf(print_msg, sizeof(print_msg), "\033[35mUser %s\033[0m> %s\n", client_ip, msg);
+        printMsg(stdout, print_msg);
+
+		//grafw reply
+        printMsg(stdout, "Reply> ");
+        if (fgets(reply, sizeof(reply), stdin) == NULL) {
+            printMsg(stdout, "\nServer input closed\n");
+            close(client_fd);
+            close(socket_fd);
+            break;
+        }
+
+        reply[strcspn(reply, "\n")] = '\0';
+
+		//stelnw reply
+        if (sendMessage(client_fd, reply) == -1) {
+            perror("sendMessage failure");
+            close(client_fd);
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    close(socket_fd);
+    return 0;
+}
