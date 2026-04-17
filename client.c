@@ -5,6 +5,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include <termios.h>
+
 #include "config.h"
 #include "readwrite.h"
 #include "msg.h"
@@ -78,6 +80,9 @@ int main() {
 
         snprintf(print_msg, sizeof(print_msg), "Server> %s\n", reply);
         printMsg(stdout, print_msg);
+
+        //diagrafw oti egrapse o client oso perimene ton server
+        tcflush(STDIN_FILENO, TCIFLUSH);
     }
 
     return 0;
