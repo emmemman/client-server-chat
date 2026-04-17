@@ -4,20 +4,48 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <errno.h>
-
-#include <termios.h>
+#include <pthread.h>
 
 #include "config.h"
 #include "readwrite.h"
 #include "msg.h"
 #include "printMsg.h"
 
+void *receive_messages(void *arg) {
+    int socket_fd = *(int *)arg;
+    char reply[MAX_MSG_LEN + 1];
+    char print_msg[MAX_PRINT_MSG_LEN + 1];
+
+    while (1) {
+        //perimenw mhnuma apo server
+        ssize_t read_bytes = recvMessage(socket_fd, reply, MAX_MSG_LEN);
+
+        if (read_bytes == 0) {
+            printMsg(stdout, "\nServer disconnected\n");
+            close(socket_fd);
+            exit(EXIT_SUCCESS);
+        } else if (read_bytes == -1) {
+            perror("recvMessage failure");
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        } else if (read_bytes == -2) {
+            printMsg(stderr, "\nerror: server message too large for buffer\n");
+            close(socket_fd);
+            exit(EXIT_FAILURE);
+        }
+        //grafw oti egrapse o server
+        snprintf(print_msg, sizeof(print_msg), "Server> %s\n> ", reply);
+        printMsg(stdout, print_msg);
+    }
+
+    return NULL;
+}
+
 int main() {
     struct sockaddr_in addr;
     int socket_fd;
     char msg[MAX_MSG_LEN + 1];
-    char reply[MAX_MSG_LEN + 1];
-    char print_msg[MAX_PRINT_MSG_LEN + 1];
+    pthread_t receiver_thread;
 
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd == -1) {
@@ -42,10 +70,16 @@ int main() {
 
     printMsg(stdout, "Connected to server\n");
 
+    //arxizei thread gia na perimenei mhnuma apo server
+    if (pthread_create(&receiver_thread, NULL, receive_messages, &socket_fd) != 0) {
+        perror("pthread_create failure");
+        close(socket_fd);
+        exit(EXIT_FAILURE);
+    }
+
     while (1) {
         printMsg(stdout, "> ");
-
-		//diavazw apo plhktrologio
+        //perimenw mhnuma apo server
         if (fgets(msg, sizeof(msg), stdin) == NULL) {
             printMsg(stdout, "\nDisconnected from server\n");
             close(socket_fd);
@@ -54,36 +88,16 @@ int main() {
 
         msg[strcspn(msg, "\n")] = '\0';
 
-		//stelnw mhmuma
+        //stelnw mhnuma ston server
         if (sendMessage(socket_fd, msg) == -1) {
             perror("sendMessage failure");
             close(socket_fd);
             exit(EXIT_FAILURE);
         }
-
-		//stamataw mexri na apanthsei o server
-        ssize_t read_bytes = recvMessage(socket_fd, reply, MAX_MSG_LEN);
-
-        if (read_bytes == 0) {
-            printMsg(stdout, "Server disconnected\n");
-            close(socket_fd);
-            break;
-        } else if (read_bytes == -1) {
-            perror("recvMessage failure");
-            close(socket_fd);
-            exit(EXIT_FAILURE);
-        } else if (read_bytes == -2) {
-            printMsg(stderr, "error: server message too large for buffer\n");
-            close(socket_fd);
-            exit(EXIT_FAILURE);
-        }
-
-        snprintf(print_msg, sizeof(print_msg), "Server> %s\n", reply);
-        printMsg(stdout, print_msg);
-
-        //diagrafw oti egrapse o client oso perimene ton server
-        tcflush(STDIN_FILENO, TCIFLUSH);
     }
+
+    //perimenw to thread na teleiwsei prin kleisw to programma
+    pthread_join(receiver_thread, NULL);
 
     return 0;
 }
