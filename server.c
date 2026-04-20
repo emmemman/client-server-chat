@@ -10,134 +10,53 @@
 #include "readwrite.h"
 #include "msg.h"
 #include "printMsg.h"
+#include "clientsList.h"
 
-#define MAX_CLIENTS 100
+// Η λίστα με όλους τους συνδεδεμένους clients.
+// Είναι global ώστε να μπορούν να τη χρησιμοποιούν όλα τα threads.
+struct clientsList cl;
 
-// =========================
-// ΔΟΜΗ CLIENT
-// =========================
-// Κρατάμε για κάθε συνδεδεμένο client:
-// 1. το socket descriptor του
-// 2. την IP του σε μορφή string
-struct client_info {
-    int client_fd;
-    char client_ip[INET_ADDRSTRLEN];
-};
-
-// =========================
-// ΠΑΓΚΟΣΜΙΑ ΛΙΣΤΑ CLIENTS
-// =========================
-// Ο server πρέπει να ξέρει ποιοι clients είναι συνδεδεμένοι
-// ώστε όταν λάβει μήνυμα από έναν client να το στείλει στους άλλους.
-struct client_info clients[MAX_CLIENTS];
-int client_count = 0;
-
-// Mutex για συγχρονισμό πρόσβασης στη λίστα clients.
-// Είναι απαραίτητο γιατί πολλά threads θα διαβάζουν/αλλάζουν
-// ταυτόχρονα τη δομή clients[].
-pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// =========================
-// ΔΟΜΗ ARGUMENTS ΓΙΑ THREAD
-// =========================
-// Όταν φτιάχνουμε ένα thread για έναν client,
-// του περνάμε όλα τα στοιχεία που χρειάζεται.
+// Δομή ορισμάτων για κάθε thread.
+// Κάθε thread πρέπει να ξέρει:
+// 1. ποιο socket διαχειρίζεται
+// 2. ποια είναι η IP του client (για εκτύπωση)
 struct thread_args {
     int client_fd;
     char client_ip[INET_ADDRSTRLEN];
 };
 
-// =========================
-// ΠΡΟΣΘΗΚΗ CLIENT ΣΤΗ ΛΙΣΤΑ
-// =========================
-void add_client(int client_fd, const char *client_ip) {
-    pthread_mutex_lock(&clients_mutex);
-
-    if (client_count < MAX_CLIENTS) {
-        clients[client_count].client_fd = client_fd;
-        strncpy(clients[client_count].client_ip, client_ip, INET_ADDRSTRLEN - 1);
-        clients[client_count].client_ip[INET_ADDRSTRLEN - 1] = '\0';
-        client_count++;
-    }
-
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-// =========================
-// ΑΦΑΙΡΕΣΗ CLIENT ΑΠΟ ΤΗ ΛΙΣΤΑ
-// =========================
-// Όταν ένας client αποσυνδεθεί, πρέπει να φύγει από τη λίστα.
-// Για να μη μείνουν "τρύπες", μεταφέρουμε τον τελευταίο client
-// στη θέση αυτού που φεύγει.
-void remove_client(int client_fd) {
-    pthread_mutex_lock(&clients_mutex);
-
-    for (int i = 0; i < client_count; i++) {
-        if (clients[i].client_fd == client_fd) {
-            clients[i] = clients[client_count - 1];
-            client_count--;
-            break;
-        }
-    }
-
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-// =========================
-// BROADCAST ΜΗΝΥΜΑΤΟΣ
-// =========================
-// Στέλνουμε το μήνυμα σε όλους τους clients
-// εκτός από αυτόν που το έστειλε.
-void broadcast_message(const char *message, int sender_fd) {
-    pthread_mutex_lock(&clients_mutex);
-
-    for (int i = 0; i < client_count; i++) {
-        if (clients[i].client_fd != sender_fd) {
-            if (sendMessage(clients[i].client_fd, message) == -1) {
-                perror("sendMessage failure");
-            }
-        }
-    }
-
-    pthread_mutex_unlock(&clients_mutex);
-}
-
-// =========================
-// THREAD FUNCTION ΓΙΑ ΚΑΘΕ CLIENT
-// =========================
-// Κάθε client έχει το δικό του thread.
-// Το thread:
-// 1. περιμένει μηνύματα από τον client
-// 2. όταν λάβει μήνυμα, το εμφανίζει στον server
-// 3. το προωθεί στους υπόλοιπους clients
-// 4. αν ο client φύγει, τον αφαιρεί από τη λίστα
+// Thread function:
+// Διαχειρίζεται έναν συγκεκριμένο πελάτη.
+// Περιμένει μηνύματα από αυτόν και τα προωθεί στους υπόλοιπους.
 void *handle_client(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
 
     int client_fd = args->client_fd;
     char client_ip[INET_ADDRSTRLEN];
+
     char msg[MAX_MSG_LEN + 1];
     char print_msg[MAX_PRINT_MSG_LEN + 1];
-    char broadcast_msg[MAX_PRINT_MSG_LEN + 1];
+    char forward_msg[MAX_PRINT_MSG_LEN + 1];
 
-    // Κρατάμε το IP τοπικά, γιατί μετά θα ελευθερώσουμε το arg
-    strncpy(client_ip, args->client_ip, INET_ADDRSTRLEN - 1);
-    client_ip[INET_ADDRSTRLEN - 1] = '\0';
+    // Αντιγράφουμε την IP τοπικά, ώστε μετά να μπορούμε να ελευθερώσουμε το args
+    strcpy(client_ip, args->client_ip);
 
-    // Δεν χρειαζόμαστε πια τη δεσμευμένη μνήμη των arguments
-    free(arg);
+    // Το arg είχε δεσμευτεί με malloc στη main, άρα τώρα δεν χρειάζεται άλλο
+    free(args);
 
     while (1) {
         // Περιμένουμε μήνυμα από τον συγκεκριμένο client
         ssize_t read_bytes = recvMessage(client_fd, msg, MAX_MSG_LEN);
 
-        // Ο client έκλεισε κανονικά τη σύνδεση
+        // Ο client έκλεισε τη σύνδεση
         if (read_bytes == 0) {
             snprintf(print_msg, sizeof(print_msg),
                      "-- User %s has left the conversation\n", client_ip);
             printMsg(stdout, print_msg);
 
-            remove_client(client_fd);
+            // Αφαιρούμε τον client από τη λίστα
+            removeClient(&cl, client_fd);
+
             close(client_fd);
             pthread_exit(NULL);
         }
@@ -145,64 +64,76 @@ void *handle_client(void *arg) {
         else if (read_bytes == -1) {
             perror("recvMessage failure");
 
-            remove_client(client_fd);
+            removeClient(&cl, client_fd);
             close(client_fd);
             pthread_exit(NULL);
         }
-        // Το μήνυμα ήταν μεγαλύτερο από το επιτρεπτό buffer
+        // Πολύ μεγάλο μήνυμα
         else if (read_bytes == -2) {
             snprintf(print_msg, sizeof(print_msg),
                      "error: message from %s too large for buffer\n", client_ip);
             printMsg(stderr, print_msg);
 
-            remove_client(client_fd);
+            removeClient(&cl, client_fd);
             close(client_fd);
             pthread_exit(NULL);
         }
 
-        // Εμφάνιση του μηνύματος στον server
+        // Εκτύπωση του μηνύματος στον server
         snprintf(print_msg, sizeof(print_msg),
                  "\033[35mUser %s\033[0m> %s\n", client_ip, msg);
         printMsg(stdout, print_msg);
 
-        // Δημιουργία μορφοποιημένου μηνύματος για αποστολή στους άλλους clients
-        snprintf(broadcast_msg, sizeof(broadcast_msg),
+        // Δημιουργούμε το μήνυμα που θα σταλεί στους άλλους clients
+        snprintf(forward_msg, sizeof(forward_msg),
                  "User %s> %s", client_ip, msg);
 
-        // Αποστολή του μηνύματος σε όλους τους υπόλοιπους
-        broadcast_message(broadcast_msg, client_fd);
+        // Προώθηση του μηνύματος σε όλους τους συνδεδεμένους clients
+        // Η clientsList είναι thread-safe, άρα μπορούμε να την
+        // χρησιμοποιήσουμε με ασφάλεια από πολλά threads.
+        for (int i = 0; i < getClientsCount(&cl); i++) {
+            int fd = getClientAt(&cl, i);
+
+            // Δεν ξαναστέλνουμε το μήνυμα στον αποστολέα
+            if (fd != client_fd) {
+                if (sendMessage(fd, forward_msg) == -1) {
+                    perror("sendMessage failure");
+                }
+            }
+        }
     }
 
     return NULL;
 }
 
-// =========================
-// MAIN
-// =========================
 int main() {
     struct sockaddr_in addr;
     int socket_fd;
     int socket_option;
 
-    // Στοιχεία του client που συνδέεται κάθε φορά
     struct sockaddr_in client_addr;
     socklen_t client_addr_len;
     int client_fd;
     char client_ip[INET_ADDRSTRLEN];
 
+    // Αρχικοποίηση της λίστας clients
+    initClientsList(&cl);
+
     // Δημιουργία TCP socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd == -1) {
         perror("socket failure");
+        destroyClientsList(&cl);
         exit(EXIT_FAILURE);
     }
 
-    // Επιτρέπει επαναχρησιμοποίηση της θύρας
+    // Επιτρέπει γρήγορη επαναχρησιμοποίηση της πόρτας
     socket_option = 1;
     if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR,
                    &socket_option, sizeof(socket_option)) == -1) {
         close(socket_fd);
         perror("setsockopt failure");
+        destroyClientsList(&cl);
         exit(EXIT_FAILURE);
     }
 
@@ -211,79 +142,79 @@ int main() {
     addr.sin_port = htons(PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    // Συσχέτιση socket με IP/port
+    // Συσχέτιση socket με IP και port
     if (bind(socket_fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
         close(socket_fd);
         perror("bind failure");
+        destroyClientsList(&cl);
         exit(EXIT_FAILURE);
     }
 
-    // Το socket μπαίνει σε listening mode
+    // Ο server μπαίνει σε listening mode
     if (listen(socket_fd, SOMAXCONN) == -1) {
         close(socket_fd);
         perror("listen failure");
+        destroyClientsList(&cl);
         exit(EXIT_FAILURE);
     }
 
     printf("Listening on port %d\n", PORT);
 
-    // =========================
-    // ΒΑΣΙΚΟΣ ΒΡΟΧΟΣ SERVER
-    // =========================
-    // Εδώ είναι η μεγάλη αλλαγή της Έκδοσης #3:
-    // Το main ΔΕΝ διαβάζει από πληκτρολόγιο.
-    // Το μόνο που κάνει είναι να δέχεται συνεχώς νέες συνδέσεις.
+    // Ο βασικός βρόχος της main κάνει μόνο accept νέων συνδέσεων
     while (1) {
         pthread_t tid;
         struct thread_args *args;
+        char print_msg[MAX_PRINT_MSG_LEN + 1];
 
         client_addr_len = sizeof(client_addr);
 
-        // Περιμένουμε νέο client
+        // Αναμονή για νέο client
         client_fd = accept(socket_fd, (struct sockaddr *)&client_addr, &client_addr_len);
         if (client_fd == -1) {
             perror("accept failure");
             continue;
         }
 
-        // Μετατροπή της IP του client σε string
+        // Μετατροπή IP σε string
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
 
-        // Εμφάνιση μηνύματος σύνδεσης
-        char print_msg[MAX_PRINT_MSG_LEN + 1];
+        // Εμφάνιση σύνδεσης νέου client
         snprintf(print_msg, sizeof(print_msg),
                  "-- User %s has joined the conversation\n", client_ip);
         printMsg(stdout, print_msg);
 
-        // Προσθήκη του client στη λίστα των ενεργών clients
-        add_client(client_fd, client_ip);
+        // Προσθήκη του νέου client στη δομή clientsList
+        addClient(&cl, client_fd);
 
-        // Δεσμεύουμε μνήμη για τα arguments του thread
+        // Δεσμεύουμε μνήμη για τα ορίσματα του thread
         args = malloc(sizeof(struct thread_args));
         if (args == NULL) {
             perror("malloc failure");
-            remove_client(client_fd);
+            removeClient(&cl, client_fd);
             close(client_fd);
             continue;
         }
 
         args->client_fd = client_fd;
-        strncpy(args->client_ip, client_ip, INET_ADDRSTRLEN - 1);
-        args->client_ip[INET_ADDRSTRLEN - 1] = '\0';
+        strcpy(args->client_ip, client_ip);
 
-        // Δημιουργία thread για διαχείριση του συγκεκριμένου client
+        // Δημιουργούμε νέο thread για τον συγκεκριμένο client
         if (pthread_create(&tid, NULL, handle_client, args) != 0) {
             perror("pthread_create failure");
-            remove_client(client_fd);
+            removeClient(&cl, client_fd);
             close(client_fd);
             free(args);
             continue;
         }
 
-        // Detach ώστε να μην χρειάζεται pthread_join για κάθε client
+        // Detached thread για να μη χρειαζόμαστε pthread_join
         pthread_detach(tid);
     }
 
+    // Θεωρητικά δεν φτάνουμε εδώ λόγω while(1),
+    // αλλά σωστά το αφήνουμε για πληρότητα.
+    destroyClientsList(&cl);
     close(socket_fd);
+
     return 0;
 }
