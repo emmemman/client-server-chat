@@ -46,16 +46,38 @@ int removeClient(struct clientsList *cl, int fd)
 	return 0;
 }
 
-int broadcastClientsList(struct clientsList *cl, const char *msg, const char *sender, int sender_fd) {
+int broadcastClientsList(struct clientsList *cl, const char *msg,
+                         const char *sender, int sender_fd)
+{
+    int i;
+    int success_count = 0;
 
-	(void) cl;
-	(void) msg;
-	(void) sender;
-	(void) sender_fd;
+    pthread_mutex_lock(&cl->clients_lock);
 
-	//TODO use sendNewMessage to broadcast the message to all clients except the sender of the message
+    for (i = 0; i < cl->clients_num; i++) {
+        int client_fd = cl->clients_fd[i];
 
-	return 0;
+        // Do not send the message back to the sender
+        if (client_fd == sender_fd)
+            continue;
+
+        // Attempt to send the message to this client
+        if (sendNewMessage(client_fd, msg, sender) == -1) {
+            // Sending failed. The client may have disconnected.
+            // The main thread for this client will eventually notice
+            // and call removeClient(). We simply skip this one.
+            // Optionally: log the failure (fprintf(stderr, ...))
+            continue;
+        }
+
+        success_count++;
+    }
+
+    pthread_mutex_unlock(&cl->clients_lock);
+
+    // Return 0 even if some sends failed – the caller doesn't need a count.
+    // We could return success_count or -1 on total failure, but spec says 0.
+    return 0;
 }
 
 void destroyClientsList(struct clientsList *cl)

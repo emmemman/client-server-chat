@@ -14,27 +14,30 @@
 void *receive_messages(void *arg) {
     int socket_fd = *(int *)arg;
     char reply[MAX_MSG_LEN + 1];
+    char sender[MAX_NAME_LEN + 1];
     char print_msg[MAX_PRINT_MSG_LEN + 1];
 
     while (1) {
-        //perimenw mhnuma apo server
-        ssize_t read_bytes = recvMessage(socket_fd, reply, MAX_MSG_LEN);
+        // Receive message with sender from server
+        ssize_t read_bytes = recvNewMessage(socket_fd, reply, MAX_MSG_LEN,
+                                            sender, MAX_NAME_LEN);
 
         if (read_bytes == 0) {
             printMsg(stdout, "\nServer disconnected\n");
             close(socket_fd);
             exit(EXIT_SUCCESS);
         } else if (read_bytes == -1) {
-            perror("recvMessage failure");
+            perror("recvNewMessage failure");
             close(socket_fd);
             exit(EXIT_FAILURE);
         } else if (read_bytes == -2) {
-            printMsg(stderr, "\nerror: server message too large for buffer\n");
+            printMsg(stderr, "\nerror: server message or sender too large for buffer\n");
             close(socket_fd);
             exit(EXIT_FAILURE);
         }
-        //grafw oti egrapse o server
-        snprintf(print_msg, sizeof(print_msg), "Server> %s\n> ", reply);
+
+        // Display the received message with sender name
+        snprintf(print_msg, sizeof(print_msg), "%s> %s\n> ", sender, reply);
         printMsg(stdout, print_msg);
     }
 
@@ -70,7 +73,7 @@ int main() {
 
     printMsg(stdout, "Connected to server\n");
 
-    //arxizei thread gia na perimenei mhnuma apo server
+    // Start thread to listen for messages from server
     if (pthread_create(&receiver_thread, NULL, receive_messages, &socket_fd) != 0) {
         perror("pthread_create failure");
         close(socket_fd);
@@ -79,7 +82,7 @@ int main() {
 
     while (1) {
         printMsg(stdout, "> ");
-        //perimenw mhnuma apo server
+        // Read user input
         if (fgets(msg, sizeof(msg), stdin) == NULL) {
             printMsg(stdout, "\nDisconnected from server\n");
             close(socket_fd);
@@ -88,7 +91,7 @@ int main() {
 
         msg[strcspn(msg, "\n")] = '\0';
 
-        //stelnw mhnuma ston server
+        // Send plain message to server (server adds the sender name)
         if (sendMessage(socket_fd, msg) == -1) {
             perror("sendMessage failure");
             close(socket_fd);
@@ -96,7 +99,7 @@ int main() {
         }
     }
 
-    //perimenw to thread na teleiwsei prin kleisw to programma
+    // Wait for receiver thread to finish before exiting
     pthread_join(receiver_thread, NULL);
 
     return 0;
