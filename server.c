@@ -5,6 +5,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include <termios.h>
+
 #include "config.h"
 #include "readwrite.h"
 #include "msg.h"
@@ -16,6 +18,7 @@ int main() {
     int client_fd;
     int socket_option;
 
+    // data required to read the IP address of the connected client
     struct sockaddr_in client_addr;
     socklen_t client_addr_len = sizeof(client_addr);
     char client_ip[INET_ADDRSTRLEN];
@@ -30,6 +33,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
+    // necessary option for quick reusage of the port
     socket_option = 1;
     if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &socket_option, sizeof(socket_option)) == -1) {
         close(socket_fd);
@@ -109,6 +113,9 @@ int main() {
             close(socket_fd);
             exit(EXIT_FAILURE);
         }
+
+        //diagrafw oti egrapse o server oso perimene ton server
+        tcflush(STDIN_FILENO, TCIFLUSH);
     }
 
     close(socket_fd);
