@@ -14,11 +14,9 @@ void add_history(struct message_history *hist, const char *sender, const char *m
 
     int idx;
     if (hist->count < MAX_HISTORY) {
-        // Buffer not yet full – append at end
         idx = (hist->start + hist->count) % MAX_HISTORY;
         hist->count++;
     } else {
-        // Buffer full – overwrite the oldest entry
         idx = hist->start;
         hist->start = (hist->start + 1) % MAX_HISTORY;
     }
@@ -36,10 +34,9 @@ void send_history(int client_fd, struct message_history *hist) {
 
     for (int i = 0; i < hist->count; i++) {
         int idx = (hist->start + i) % MAX_HISTORY;
-        // Use sendNewMessage to send sender + message
+        //xrhsimopoiw sendNewMessage gia na steilw sender + message
         if (sendNewMessage(client_fd, hist->entries[idx].msg,
                            hist->entries[idx].sender) == -1) {
-            // If sending fails, client probably disconnected – stop
             break;
         }
     }

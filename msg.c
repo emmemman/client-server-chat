@@ -61,23 +61,23 @@ ssize_t sendNewMessage(int fd, const char *msg, const char *sender)
     uint32_t net_sender_len = htonl(sender_len);
     uint32_t net_msg_len    = htonl(msg_len);
 
-    // Send sender length
+    //steile mhkos sender
     if (writeall(fd, &net_sender_len, sizeof(net_sender_len)) == -1)
         return -1;
 
-    // Send sender name
+    //steile onoma sender
     if (writeall(fd, sender, sender_len) == -1)
         return -1;
 
-    // Send message length
+    // steile mhkos mhnumatos
     if (writeall(fd, &net_msg_len, sizeof(net_msg_len)) == -1)
         return -1;
 
-    // Send message content
+    //steile mhnuma
     if (writeall(fd, msg, msg_len) == -1)
         return -1;
 
-    // Return total number of payload bytes sent (sender + message)
+    //teliko megethos sender+mhnuma
     return (ssize_t)(sender_len + msg_len);
 }
 
@@ -88,45 +88,39 @@ ssize_t recvNewMessage(int fd, char *msg, size_t msg_max_len,
     uint32_t net_sender_len, sender_len;
     uint32_t net_msg_len, msg_len;
 
-    // 1. Read sender length header
+    // 1diavase header sender
     nread = readall(fd, &net_sender_len, sizeof(net_sender_len));
     if (nread == 0 || nread == -1)
         return nread;
 
     sender_len = ntohl(net_sender_len);
 
-    // Validate sender length against provided buffer
+    //validation
     if (sender_len >= sender_max_len)
-        return -2;   // sender too long for buffer
+        return -2;
 
-    // Optional: global upper bound (you may define MAX_NAME_LEN)
-    // if (sender_len > MAX_NAME_LEN) return -3;
-
-    // 2. Read sender string
+    //diavase string
     nread = readall(fd, sender, sender_len);
     if (nread == 0 || nread == -1)
         return nread;
     sender[sender_len] = '\0';
 
-    // 3. Read message length header
+    // diavase message header
     nread = readall(fd, &net_msg_len, sizeof(net_msg_len));
     if (nread == 0 || nread == -1)
         return nread;
 
     msg_len = ntohl(net_msg_len);
 
-    // Validate message length against buffer and global limit
+    //validation
     if (msg_len >= msg_max_len)
         return -2;   // message too long for buffer
 
-    // if (msg_len > MAX_MSG_LEN) return -3;
-
-    // 4. Read message string
+    // diavase message string
     nread = readall(fd, msg, msg_len);
     if (nread == 0 || nread == -1)
         return nread;
     msg[msg_len] = '\0';
 
-    // Return number of bytes read for the message payload
     return nread;
 }

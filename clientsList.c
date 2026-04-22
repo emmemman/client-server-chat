@@ -50,33 +50,25 @@ int broadcastClientsList(struct clientsList *cl, const char *msg,
                          const char *sender, int sender_fd)
 {
     int i;
-    int success_count = 0;
 
     pthread_mutex_lock(&cl->clients_lock);
 
     for (i = 0; i < cl->clients_num; i++) {
         int client_fd = cl->clients_fd[i];
 
-        // Do not send the message back to the sender
+        //den stelnw mhnuma ston sender
         if (client_fd == sender_fd)
             continue;
 
-        // Attempt to send the message to this client
+        //prospatheia apostolhs mhnumatos
         if (sendNewMessage(client_fd, msg, sender) == -1) {
-            // Sending failed. The client may have disconnected.
-            // The main thread for this client will eventually notice
-            // and call removeClient(). We simply skip this one.
-            // Optionally: log the failure (fprintf(stderr, ...))
             continue;
         }
 
-        success_count++;
     }
 
     pthread_mutex_unlock(&cl->clients_lock);
 
-    // Return 0 even if some sends failed – the caller doesn't need a count.
-    // We could return success_count or -1 on total failure, but spec says 0.
     return 0;
 }
 

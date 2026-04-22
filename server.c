@@ -13,29 +13,27 @@
 #include "clientsList.h"
 #include "history.h"
 
-// Global clients list (thread-safe)
+//clients list
 struct clientsList cl;
 struct message_history history;
 
-// Mutex and counter for generating unique default names
+//mutex gia onomata
 static pthread_mutex_t name_counter_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int name_counter = 0;
 
-// Structure for thread arguments
 struct thread_args {
     int client_fd;
     char client_ip[INET_ADDRSTRLEN];
 };
 
-// Thread function: handles one client
 void *handle_client(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
     int client_fd = args->client_fd;
     char client_ip[INET_ADDRSTRLEN];
     strcpy(client_ip, args->client_ip);
-    free(args);  // args no longer needed
+    free(args); 
 
-    // ----- Assign a unique default name -----
+    //dinw onoma
     char sender_name[MAX_NAME_LEN];
     pthread_mutex_lock(&name_counter_lock);
     snprintf(sender_name, sizeof(sender_name), "User%u", ++name_counter);
@@ -44,20 +42,18 @@ void *handle_client(void *arg) {
     char msg[MAX_MSG_LEN + 1];
     char print_msg[MAX_PRINT_MSG_LEN + 1];
 
-    // Announce join
     snprintf(print_msg, sizeof(print_msg),
              "-- %s (%s) has joined the conversation\n", sender_name, client_ip);
     printMsg(stdout, print_msg);
 
-    // Send chat history to the new client
+    //stelnw history
     send_history(client_fd, &history);
 
     while (1) {
-        // Receive a message from this client (raw content, no sender)
+        //receive mhnuma
         ssize_t read_bytes = recvMessage(client_fd, msg, sizeof(msg) - 1);
 
         if (read_bytes == 0) {
-            // Client closed connection
             snprintf(print_msg, sizeof(print_msg),
                      "-- %s (%s) has left the conversation\n", sender_name, client_ip);
             printMsg(stdout, print_msg);
@@ -68,21 +64,19 @@ void *handle_client(void *arg) {
             break;
         }
         else if (read_bytes == -2 || read_bytes == -3) {
-            // Message too large (buffer or global limit)
             snprintf(print_msg, sizeof(print_msg),
                      "error: message from %s too large\n", sender_name);
             printMsg(stderr, print_msg);
             break;
         }
 
-        // Null-terminate just in case
         msg[read_bytes] = '\0';
 
-        // Check for the /name command
+        //elegxos gia allagh onomatos
         if (strncmp(msg, "\\name ", 6) == 0) {
-            // Extract new name (trim trailing whitespace/newline if any)
+            //kainourgio onoma
             char *new_name = msg + 6;
-            // Remove trailing newline if present (from client's input)
+
             size_t len = strlen(new_name);
             while (len > 0 && (new_name[len-1] == '\n' || new_name[len-1] == '\r'))
                 new_name[--len] = '\0';
@@ -97,23 +91,19 @@ void *handle_client(void *arg) {
                          "error: invalid name length\n");
                 printMsg(stderr, print_msg);
             }
-            continue;  // Do not broadcast the command
+            continue;
         }
 
-        // Print the received message on the server console
+        //typwnw mhnuma
         snprintf(print_msg, sizeof(print_msg),
                  "\033[35m%s\033[0m> %s\n", sender_name, msg);
         printMsg(stdout, print_msg);
 
-        // Add to history
         add_history(&history, sender_name, msg);
 
-        // Broadcast the message to all other connected clients
-        // broadcastClientsList will use sendNewMessage to include sender_name
         broadcastClientsList(&cl, msg, sender_name, client_fd);
     }
 
-    // Cleanup: remove client from list, close socket, exit thread
     removeClient(&cl, client_fd);
     close(client_fd);
     return NULL;
@@ -129,13 +119,10 @@ int main() {
     int client_fd;
     char client_ip[INET_ADDRSTRLEN];
 
-    // Initialize the clients list
     initClientsList(&cl);
 
-    // Initialize history
     init_history(&history);
 
-    // Create TCP socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd == -1) {
         perror("socket failure");
@@ -143,7 +130,6 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Allow reuse of local address
     socket_option = 1;
     if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR,
                    &socket_option, sizeof(socket_option)) == -1) {
@@ -153,7 +139,6 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Bind to port
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
@@ -164,7 +149,6 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // Start listening
     if (listen(socket_fd, SOMAXCONN) == -1) {
         close(socket_fd);
         perror("listen failure");
@@ -174,7 +158,6 @@ int main() {
 
     printf("Listening on port %d\n", PORT);
 
-    // Main loop: accept new clients
     while (1) {
         pthread_t tid;
         struct thread_args *args;
@@ -187,12 +170,10 @@ int main() {
             continue;
         }
 
-        // Convert client IP to string
+        // metatroph client IP to string
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
 
-        // Add client to the thread-safe list
         if (addClient(&cl, client_fd) == -1) {
-            // Too many clients
             snprintf(print_msg, sizeof(print_msg),
                      "error: maximum clients reached, rejecting %s\n", client_ip);
             printMsg(stderr, print_msg);
@@ -200,7 +181,6 @@ int main() {
             continue;
         }
 
-        // Prepare thread arguments
         args = malloc(sizeof(struct thread_args));
         if (args == NULL) {
             perror("malloc failure");
@@ -211,7 +191,6 @@ int main() {
         args->client_fd = client_fd;
         strcpy(args->client_ip, client_ip);
 
-        // Create a detached thread to handle this client
         if (pthread_create(&tid, NULL, handle_client, args) != 0) {
             perror("pthread_create failure");
             removeClient(&cl, client_fd);
@@ -224,7 +203,6 @@ int main() {
 
 
     destroy_history(&history);
-    // Not reached, but clean up for completeness
     destroyClientsList(&cl);
     close(socket_fd);
     return 0;

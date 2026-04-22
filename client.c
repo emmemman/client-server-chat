@@ -18,25 +18,25 @@ void *receive_messages(void *arg) {
     char print_msg[MAX_PRINT_MSG_LEN + 1];
 
     while (1) {
-        // Receive message with sender from server
+        //receive message with sender from server
         ssize_t read_bytes = recvNewMessage(socket_fd, reply, MAX_MSG_LEN,
                                             sender, MAX_NAME_LEN);
 
         if (read_bytes == 0) {
             printMsg(stdout, "\nServer disconnected\n");
-            close(socket_fd);
-            exit(EXIT_SUCCESS);
+            shutdown(socket_fd, SHUT_RDWR);
+            break;
         } else if (read_bytes == -1) {
             perror("recvNewMessage failure");
-            close(socket_fd);
-            exit(EXIT_FAILURE);
+            shutdown(socket_fd, SHUT_RDWR);
+            break;
         } else if (read_bytes == -2) {
             printMsg(stderr, "\nerror: server message or sender too large for buffer\n");
-            close(socket_fd);
-            exit(EXIT_FAILURE);
+            shutdown(socket_fd, SHUT_RDWR);
+            break;
         }
 
-        // Display the received message with sender name
+        //emfanizw to mhnuma me to onoma tou sender
         snprintf(print_msg, sizeof(print_msg), "%s> %s\n> ", sender, reply);
         printMsg(stdout, print_msg);
     }
@@ -73,7 +73,7 @@ int main() {
 
     printMsg(stdout, "Connected to server\n");
 
-    // Start thread to listen for messages from server
+    //thread gia mhnumata apo server
     if (pthread_create(&receiver_thread, NULL, receive_messages, &socket_fd) != 0) {
         perror("pthread_create failure");
         close(socket_fd);
@@ -82,25 +82,23 @@ int main() {
 
     while (1) {
         printMsg(stdout, "> ");
-        // Read user input
+
         if (fgets(msg, sizeof(msg), stdin) == NULL) {
             printMsg(stdout, "\nDisconnected from server\n");
-            close(socket_fd);
+            shutdown(socket_fd, SHUT_RDWR);
             break;
         }
 
         msg[strcspn(msg, "\n")] = '\0';
 
-        // Send plain message to server (server adds the sender name)
         if (sendMessage(socket_fd, msg) == -1) {
             perror("sendMessage failure");
-            close(socket_fd);
-            exit(EXIT_FAILURE);
+            shutdown(socket_fd, SHUT_RDWR);
+            break;
         }
     }
 
-    // Wait for receiver thread to finish before exiting
     pthread_join(receiver_thread, NULL);
-
+    close(socket_fd);
     return 0;
 }
